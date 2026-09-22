@@ -15,6 +15,11 @@ Every `POLL_INTERVAL` seconds it lists open PRs authored by `PR_AUTHOR` in
 Each head SHA is reviewed at most once. The first time the poller sees a PR it
 only records a baseline (no review), so restarts never cause surprise reviews.
 
+If a review fails (network, git, LLM, …) the trigger is *not* consumed: it is
+retried on the next poll, up to 5 attempts, before the poller gives up loudly
+in the logs. Posting a new `/ocr` comment re-arms the trigger. One PR's
+failure never blocks the other PRs in the same poll cycle.
+
 The review itself runs `ocr review --from origin/<base> --to <head> --format json`
 and posts results with the official
 `post-review-comments.js` from the open-code-review repo (vendored under
