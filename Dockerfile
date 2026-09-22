@@ -13,10 +13,18 @@ RUN apt-get update \
  && cd / && rm -rf /tmp/git-2.51.0 \
  && apt-get purge -y gcc make zlib1g-dev libssl-dev libcurl4-gnutls-dev libexpat1-dev \
  && apt-get autoremove -y \
- && apt-get install -y --no-install-recommends python3 \
+ && rm -rf /var/lib/apt/lists/* \
+ && git --version
+
+# git-remote-https links against libcurl-gnutls, which the autoremove above
+# drops (it was auto-installed as a -dev dependency). Reinstall the runtime
+# lib explicitly, then smoke-test https so this class of breakage fails the
+# build instead of the first real clone at 4am.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends python3 libcurl3-gnutls \
  && rm -rf /var/lib/apt/lists/* \
  && npm install -g @alibaba-group/open-code-review \
- && git --version \
+ && git ls-remote https://github.com/octocat/Hello-World.git HEAD \
  && ocr version
 
 WORKDIR /app
