@@ -178,16 +178,33 @@ def raise_if_llm_total_failure(result_path, stderr_path):
                        "stderr tail: %s" % (m.group(2), serr[-1500:]))
 
 
+def apply_llm_env(env):
+    """Translate user-facing LLM env vars into what the ocr CLI actually reads.
+
+    The CLI defaults to the Anthropic protocol and does NOT read
+    OCR_LLM_USE_ANTHROPIC. The official action maps llm_use_anthropic ->
+    OCR_USE_ANTHROPIC, and OCR_LLM_PROTOCOL is honored explicitly. Without
+    this, an OpenAI-compatible endpoint silently receives requests at
+    <url>/v1/messages and every review item fails instantly.
+    """
+    # action.yml maps the token to OCR_LLM_TOKEN; accept the documented name too
+    if env.get("OCR_LLM_AUTH_TOKEN") and not env.get("OCR_LLM_TOKEN"):
+        env["OCR_LLM_TOKEN"] = env["OCR_LLM_AUTH_TOKEN"]
+    raw = str(env.get("OCR_LLM_USE_ANTHROPIC", "false")).strip().lower()
+    use_anthropic = raw in ("1", "true", "yes")
+    env["OCR_USE_ANTHROPIC"] = "true" if use_anthropic else "false"
+    env["OCR_LLM_PROTOCOL"] = "anthropic" if use_anthropic else "openai"
+    env.pop("OCR_LLM_USE_ANTHROPIC", None)  # not a real CLI variable
+    return env
+
+
 def run_review(repo, number, base_ref, head_sha, fork_repo):
     d = ensure_clone(repo)
     r = git(["fetch", "--quiet", git_url(fork_repo), head_sha], cwd=d, timeout=900)
     if r.returncode != 0:
         raise RuntimeError("fetch fork head failed: %s" % r.stderr[-500:])
     result_path, stderr_path = "/tmp/ocr-result.json", "/tmp/ocr-stderr.log"
-    env = dict(os.environ)
-    # action.yml maps the token to OCR_LLM_TOKEN; accept the documented name too
-    if env.get("OCR_LLM_AUTH_TOKEN") and not env.get("OCR_LLM_TOKEN"):
-        env["OCR_LLM_TOKEN"] = env["OCR_LLM_AUTH_TOKEN"]
+    env = apply_llm_env(dict(os.environ))
     cmd = ["ocr", "review", "--from", "origin/%s" % base_ref, "--to", head_sha,
            "--audience", "agent", "--format", "json", "--timeout", "1500"]
     log("running ocr for %s#%s @ %s" % (repo, number, head_sha[:8]))
@@ -287,6 +304,21 @@ def poll_once(state):
             log("repo %s error: %s" % (repo, e))
 
 
+def llm_self_test():
+    """Run `ocr llm test` once at startup so an LLM misconfiguration (wrong
+    protocol, bad URL, bad key) is visible in the logs immediately instead of
+    surfacing only when a review is triggered. Never blocks startup."""
+    env = apply_llm_env(dict(os.environ))
+    try:
+        r = subprocess.run(["ocr", "llm", "test"], env=env, timeout=60,
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                           text=True)
+        out = (r.stdout or "")[-800:]
+        log("llm self-test exit %d\n%s" % (r.returncode, out))
+    except Exception as e:
+        log("llm self-test error: %s" % e)
+
+
 def main():
     if not REPOS:
         log("TARGET_REPOS is empty; nothing to do")
@@ -294,6 +326,7 @@ def main():
     if not GH_TOKEN:
         log("WARNING: GITHUB_TOKEN is empty; GitHub API calls will fail")
     log("poller start repos=%s authors=%s interval=%ss" % (REPOS, AUTHORS, INTERVAL))
+    llm_self_test()
     state = load_state()
     while True:
         try:

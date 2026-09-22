@@ -36,8 +36,12 @@ behave exactly like the GitHub Action — without needing any repo admin rights.
 | `OCR_LLM_URL` | yes | LLM endpoint, e.g. `https://api.openai.com/v1/chat/completions` |
 | `OCR_LLM_AUTH_TOKEN` | yes | LLM auth token (also accepted as `OCR_LLM_TOKEN`) |
 | `OCR_LLM_MODEL` | yes | Model name |
-| `OCR_LLM_USE_ANTHROPIC` | no | `true` for Anthropic Claude models |
+| `OCR_LLM_USE_ANTHROPIC` | no | `true` for Anthropic Claude models. Translated internally to the CLI's `OCR_USE_ANTHROPIC` + `OCR_LLM_PROTOCOL` — the CLI defaults to Anthropic and ignores `OCR_LLM_USE_ANTHROPIC`, so without this translation an OpenAI-compatible endpoint would receive requests at `<url>/v1/messages` and fail every item |
 | `POLL_INTERVAL` | no | Seconds between polls (default `300`) |
+
+At startup the poller runs `ocr llm test` once and logs the result, so a wrong
+LLM URL / protocol / key is visible in the logs immediately instead of only
+when the first review is triggered.
 
 ## Local run
 
