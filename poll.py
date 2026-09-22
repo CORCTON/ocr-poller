@@ -211,17 +211,39 @@ def poll_repo(repo, state):
                     and SUMMARY_MARKER not in (c.get("body") or "")]
         if new_cmds:
             triggers.append("/ocr")
-        prev["last_comment_id"] = max_id
-        prev["head_sha"] = head
-        prev["draft"] = draft
+
+        def advance():
+            prev["last_comment_id"] = max_id
+            prev["head_sha"] = head
+            prev["draft"] = draft
+            prev.pop("fail_count", None)
+
         if not triggers:
+            advance()
             continue
         if head in prev.get("reviewed", []):
             log("%s triggered by %s but head %s already reviewed; skip"
                 % (key, triggers, head[:8]))
+            advance()
             continue
-        log("%s triggered by %s; reviewing head %s" % (key, triggers, head[:8]))
-        run_review(repo, number, base, head, fork)
+        fails = prev.get("fail_count", 0)
+        if fails >= 5:
+            log("%s giving up after %d failed attempts; post a new /ocr to retry"
+                % (key, fails))
+            advance()
+            continue
+        log("%s triggered by %s; reviewing head %s (attempt %d)"
+            % (key, triggers, head[:8], fails + 1))
+        try:
+            run_review(repo, number, base, head, fork)
+        except Exception as e:
+            # Do NOT advance last_comment_id: the trigger stays unconsumed and
+            # will be retried on the next poll. One PR's failure must not abort
+            # the rest of the repo loop either.
+            prev["fail_count"] = fails + 1
+            log("%s review failed (attempt %d): %s" % (key, fails + 1, e))
+            continue
+        advance()
         prev.setdefault("reviewed", []).append(head)
         prev["reviewed"] = prev["reviewed"][-30:]
         log("%s review posted" % key)
