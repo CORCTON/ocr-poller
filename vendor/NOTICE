@@ -1,0 +1,5 @@
+vendor/post-review-comments.js is taken verbatim from
+https://github.com/alibaba/open-code-review/blob/HEAD/scripts/github-actions/post-review-comments.js
+(Apache-2.0, Copyright 2026 alibaba/open-code-review Contributors).
+It is required as a module by ../run_poster.js, which injects the
+`github` / `context` / `core` / `fs` dependencies the script expects.
