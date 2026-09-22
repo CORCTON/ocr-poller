@@ -7,10 +7,11 @@ Built to run as a Dokploy application (any plain Docker host works too).
 ## How it works
 
 Every `POLL_INTERVAL` seconds it lists open PRs authored by `PR_AUTHOR` in
-`TARGET_REPOS` and reviews a PR only when one of these happens:
+`TARGET_REPOS` and reviews a PR only when:
 
-- the PR transitions from **draft → ready for review**, or
 - `PR_AUTHOR` posts a comment starting with **`/ocr`** on the PR.
+
+(draft → ready transitions do not trigger a review.)
 
 Each head SHA is reviewed at most once. The first time the poller sees a PR it
 only records a baseline (no review), so restarts never cause surprise reviews.

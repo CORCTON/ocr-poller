@@ -2,8 +2,8 @@
 """Poll GitHub for review triggers and run open-code-review.
 
 Triggers (only for PRs authored by someone in PR_AUTHORS, in TARGET_REPOS):
-  - draft -> ready_for_review transition
   - a new comment by someone in PR_AUTHORS whose body starts with /ocr
+(draft -> ready transitions do NOT trigger a review)
 
 State is kept in STATE_PATH as JSON:
   {"<repo>#<pr>": {"head_sha":..., "draft":..., "last_comment_id":..., "reviewed":[...]}, ...}
@@ -246,8 +246,6 @@ def poll_repo(repo, state):
             log("baseline %s head=%s draft=%s" % (key, head[:8], draft))
             continue
         triggers = []
-        if prev.get("draft") and not draft:
-            triggers.append("ready_for_review")
         new_cmds = [c.get("id", 0) for c in comments
                     if c.get("id", 0) > prev.get("last_comment_id", 0)
                     and c.get("user", {}).get("login") in AUTHORS
