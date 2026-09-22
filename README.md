@@ -25,8 +25,8 @@ behave exactly like the GitHub Action — without needing any repo admin rights.
 
 | Variable | Required | Description |
 |---|---|---|
-| `TARGET_REPOS` | yes | Comma-separated `owner/repo`, e.g. `goplus/builder,goplus/builder-backend` |
-| `PR_AUTHOR` | no | GitHub login to watch (default `CORCTON`) |
+| `TARGET_REPOS` | yes | Comma-separated `owner/repo` list, e.g. `goplus/builder,goplus/builder-backend` |
+| `PR_AUTHORS` | no | Comma-separated GitHub login list to watch (default `CORCTON`; legacy singular `PR_AUTHOR` also works) |
 | `GITHUB_TOKEN` | yes | PAT with **Pull requests: read & write** on the target repos (fine-grained, repo-scoped) |
 | `OCR_LLM_URL` | yes | LLM endpoint, e.g. `https://api.openai.com/v1/chat/completions` |
 | `OCR_LLM_AUTH_TOKEN` | yes | LLM auth token (also accepted as `OCR_LLM_TOKEN`) |
