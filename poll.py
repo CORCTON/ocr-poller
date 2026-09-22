@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Poll GitHub for review triggers and run open-code-review.
 
-Triggers (only for PRs authored by PR_AUTHOR, in TARGET_REPOS):
+Triggers (only for PRs authored by someone in PR_AUTHORS, in TARGET_REPOS):
   - draft -> ready_for_review transition
-  - a new comment by PR_AUTHOR whose body starts with /ocr
+  - a new comment by someone in PR_AUTHORS whose body starts with /ocr
 
 State is kept in STATE_PATH as JSON:
   {"<repo>#<pr>": {"head_sha":..., "draft":..., "last_comment_id":..., "reviewed":[...]}, ...}
@@ -12,7 +12,8 @@ restarts or pre-existing ready PRs never cause a surprise review.
 
 Env:
   TARGET_REPOS   comma-separated, e.g. "goplus/builder,goplus/builder-backend" (required)
-  PR_AUTHOR      GitHub login to watch, default "CORCTON"
+  PR_AUTHORS     comma-separated GitHub logins to watch, e.g. "CORCTON,teammate"
+                 (also accepts the legacy singular PR_AUTHOR; default "CORCTON")
   GITHUB_TOKEN   PAT with pull-requests write on the target repos (required)
   POLL_INTERVAL  seconds between polls, default "300"
   STATE_PATH     default "/state/state.json"
@@ -29,7 +30,9 @@ import traceback
 import urllib.request
 
 REPOS = [r.strip() for r in os.environ.get("TARGET_REPOS", "").split(",") if r.strip()]
-AUTHOR = os.environ.get("PR_AUTHOR", "CORCTON")
+AUTHORS = [a.strip() for a in
+           os.environ.get("PR_AUTHORS", os.environ.get("PR_AUTHOR", "CORCTON")).split(",")
+           if a.strip()]
 GH_TOKEN = os.environ.get("GITHUB_TOKEN", "")
 INTERVAL = int(os.environ.get("POLL_INTERVAL", "300"))
 STATE_PATH = os.environ.get("STATE_PATH", "/state/state.json")
@@ -132,7 +135,7 @@ def run_review(repo, number, base_ref, head_sha, fork_repo):
 
 def poll_repo(repo, state):
     prs = gh("/repos/%s/pulls?state=open&per_page=100" % repo)
-    mine = [p for p in prs if p.get("user", {}).get("login") == AUTHOR]
+    mine = [p for p in prs if p.get("user", {}).get("login") in AUTHORS]
     seen = set()
     for pr in mine:
         number = pr["number"]
@@ -157,7 +160,7 @@ def poll_repo(repo, state):
             triggers.append("ready_for_review")
         new_cmds = [c.get("id", 0) for c in comments
                     if c.get("id", 0) > prev.get("last_comment_id", 0)
-                    and c.get("user", {}).get("login") == AUTHOR
+                    and c.get("user", {}).get("login") in AUTHORS
                     and (c.get("body") or "").lstrip().startswith("/ocr")
                     and SUMMARY_MARKER not in (c.get("body") or "")]
         if new_cmds:
@@ -195,7 +198,7 @@ def main():
         sys.exit(1)
     if not GH_TOKEN:
         log("WARNING: GITHUB_TOKEN is empty; GitHub API calls will fail")
-    log("poller start repos=%s author=%s interval=%ss" % (REPOS, AUTHOR, INTERVAL))
+    log("poller start repos=%s authors=%s interval=%ss" % (REPOS, AUTHORS, INTERVAL))
     state = load_state()
     while True:
         try:
