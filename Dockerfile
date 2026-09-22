@@ -25,7 +25,8 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/* \
  && npm install -g @alibaba-group/open-code-review \
  && git ls-remote https://github.com/octocat/Hello-World.git HEAD \
- && ocr version
+ && ocr version \
+ && ocr config set llm.extra_body '{"thinking": {"type": "disabled"}}'
 
 WORKDIR /app
 COPY poll.py run_poster.js ./

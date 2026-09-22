@@ -206,10 +206,10 @@ def run_review(repo, number, base_ref, head_sha, fork_repo):
     result_path, stderr_path = "/tmp/ocr-result.json", "/tmp/ocr-stderr.log"
     env = apply_llm_env(dict(os.environ))
     cmd = ["ocr", "review", "--from", "origin/%s" % base_ref, "--to", head_sha,
-           "--audience", "agent", "--format", "json", "--timeout", "1500"]
+           "--audience", "agent", "--format", "json", "--timeout", "60"]
     log("running ocr for %s#%s @ %s" % (repo, number, head_sha[:8]))
     with open(result_path, "wb") as out, open(stderr_path, "wb") as err:
-        subprocess.run(cmd, cwd=d, stdout=out, stderr=err, env=env, timeout=1560)
+        subprocess.run(cmd, cwd=d, stdout=out, stderr=err, env=env, timeout=3900)
     raise_if_llm_total_failure(result_path, stderr_path)
     owner, name = repo.split("/")
     cmd = ["node", os.path.join(APP_DIR, "run_poster.js"),
