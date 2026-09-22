@@ -27,6 +27,7 @@ Env:
 """
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -47,10 +48,12 @@ SUMMARY_MARKER = "<!-- ocr-summary -->"  # our own poster comments must not retr
 
 
 def redact(s):
-    # Belt and suspenders: the token must never reach logs, even if a
+    # Belt and suspenders: tokens must never reach logs, even if a
     # subprocess echoes a URL or header back in an error message.
-    if GH_TOKEN and GH_TOKEN in s:
-        s = s.replace(GH_TOKEN, "***")
+    for tok in (GH_TOKEN, os.environ.get("OCR_LLM_AUTH_TOKEN", ""),
+                os.environ.get("OCR_LLM_TOKEN", "")):
+        if tok and tok in s:
+            s = s.replace(tok, "***")
     return s
 
 
@@ -152,6 +155,29 @@ def ensure_clone(repo):
     return d
 
 
+def raise_if_llm_total_failure(result_path, stderr_path):
+    """The `ocr` CLI exits 0 even when every selected item failed at the LLM
+    ("N of N selected item(s) failed"). That is not a completed review, so
+    surface the real error and raise: the caller retries instead of posting
+    a misleading "Review failed" summary as if the review had happened."""
+    try:
+        with open(result_path) as f:
+            result = json.load(f)
+    except Exception:
+        return  # unparsable output: let the poster deal with it
+    msg = str((result or {}).get("message", ""))
+    m = re.search(r"(\d+)\s+of\s+(\d+)\s+selected item\(s\) failed", msg)
+    if not m or m.group(1) != m.group(2) or m.group(1) == "0":
+        return
+    try:
+        with open(stderr_path, encoding="utf-8", errors="replace") as f:
+            serr = f.read()
+    except OSError:
+        serr = ""
+    raise RuntimeError("ocr: all %s selected items failed at the LLM; "
+                       "stderr tail: %s" % (m.group(2), serr[-1500:]))
+
+
 def run_review(repo, number, base_ref, head_sha, fork_repo):
     d = ensure_clone(repo)
     r = git(["fetch", "--quiet", git_url(fork_repo), head_sha], cwd=d, timeout=900)
@@ -167,6 +193,7 @@ def run_review(repo, number, base_ref, head_sha, fork_repo):
     log("running ocr for %s#%s @ %s" % (repo, number, head_sha[:8]))
     with open(result_path, "wb") as out, open(stderr_path, "wb") as err:
         subprocess.run(cmd, cwd=d, stdout=out, stderr=err, env=env, timeout=1560)
+    raise_if_llm_total_failure(result_path, stderr_path)
     owner, name = repo.split("/")
     cmd = ["node", os.path.join(APP_DIR, "run_poster.js"),
            "--owner", owner, "--repo", name, "--pr", str(number),
