@@ -14,7 +14,11 @@ Env:
   TARGET_REPOS   comma-separated, e.g. "goplus/builder,goplus/builder-backend" (required)
   PR_AUTHORS     comma-separated GitHub logins to watch, e.g. "CORCTON,teammate"
                  (also accepts the legacy singular PR_AUTHOR; default "CORCTON")
-  GITHUB_TOKEN   PAT with pull-requests write on the target repos (required)
+  GITHUB_TOKEN   PAT with pull-requests write on the target repos (required).
+                 Used for the GitHub API (Authorization header) and for git
+                 via a short-lived GIT_ASKPASS helper -- it is never embedded
+                 in clone URLs (which git would persist into .git/config),
+                 never appears in argv, and is redacted from all logs.
   POLL_INTERVAL  seconds between polls, default "300"
   STATE_PATH     default "/state/state.json"
   WORK_DIR       clone dir, default "/work"
@@ -25,6 +29,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import time
 import traceback
 import urllib.request
@@ -41,8 +46,17 @@ APP_DIR = os.path.dirname(os.path.abspath(__file__))
 SUMMARY_MARKER = "<!-- ocr-summary -->"  # our own poster comments must not retrigger
 
 
+def redact(s):
+    # Belt and suspenders: the token must never reach logs, even if a
+    # subprocess echoes a URL or header back in an error message.
+    if GH_TOKEN and GH_TOKEN in s:
+        s = s.replace(GH_TOKEN, "***")
+    return s
+
+
 def log(*a):
-    print(time.strftime("[%Y-%m-%dT%H:%M:%S]"), *a, flush=True)
+    print(time.strftime("[%Y-%m-%dT%H:%M:%S]"),
+          *[redact(str(x)) for x in a], flush=True)
 
 
 def gh(path, method="GET", data=None):
@@ -63,11 +77,6 @@ def gh(path, method="GET", data=None):
         return json.loads(raw) if raw else None
 
 
-def sh(cmd, cwd=None, timeout=120):
-    return subprocess.run(cmd, cwd=cwd, timeout=timeout,
-                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-
-
 def load_state():
     try:
         with open(STATE_PATH) as f:
@@ -84,11 +93,48 @@ def save_state(s):
     os.replace(tmp, STATE_PATH)
 
 
-def git_url(repo):
-    base = "https://github.com/%s.git" % repo
+def make_askpass():
+    """Create a short-lived askpass helper that feeds GIT_ASKPASS_TOKEN to git.
+
+    Returns the script path; the caller must delete it when done.
+    """
+    fd, path = tempfile.mkstemp(prefix="git-askpass-")
+    with os.fdopen(fd, "w") as f:
+        f.write('#!/bin/sh\nexec echo "$GIT_ASKPASS_TOKEN"\n')
+    os.chmod(path, 0o700)
+    return path
+
+
+def git(args, cwd=None, timeout=600):
+    """Run git with credentials via GIT_ASKPASS.
+
+    The token is never embedded in the clone URL (which git would persist
+    into .git/config) and never appears in argv; it is only handed to git
+    through a short-lived askpass helper. Public repos work fine without a
+    token too.
+    """
+    env = dict(os.environ)
+    askpass = None
     if GH_TOKEN:
-        return "https://x-access-token:%s@github.com/%s.git" % (GH_TOKEN, repo)
-    return base
+        askpass = make_askpass()
+        env["GIT_ASKPASS"] = askpass
+        env["GIT_ASKPASS_TOKEN"] = GH_TOKEN
+        env["GIT_TERMINAL_PROMPT"] = "0"
+    try:
+        return subprocess.run(["git"] + args, cwd=cwd, timeout=timeout, env=env,
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                              text=True)
+    finally:
+        if askpass:
+            try:
+                os.unlink(askpass)
+            except OSError:
+                pass
+
+
+def git_url(repo):
+    # Deliberately token-free: auth goes through GIT_ASKPASS in git().
+    return "https://github.com/%s.git" % repo
 
 
 def ensure_clone(repo):
@@ -96,11 +142,11 @@ def ensure_clone(repo):
     d = os.path.join(WORK_DIR, "%s__%s" % (owner, name))
     if not os.path.isdir(os.path.join(d, ".git")):
         log("cloning", repo)
-        r = sh(["git", "clone", "--quiet", git_url(repo), d], timeout=900)
+        r = git(["clone", "--quiet", git_url(repo), d], timeout=900)
         if r.returncode != 0:
             raise RuntimeError("clone failed: %s" % r.stderr[-500:])
     else:
-        r = sh(["git", "fetch", "--quiet", "origin", "--prune"], cwd=d, timeout=600)
+        r = git(["fetch", "--quiet", "origin", "--prune"], cwd=d, timeout=600)
         if r.returncode != 0:
             raise RuntimeError("fetch origin failed: %s" % r.stderr[-500:])
     return d
@@ -108,7 +154,7 @@ def ensure_clone(repo):
 
 def run_review(repo, number, base_ref, head_sha, fork_repo):
     d = ensure_clone(repo)
-    r = sh(["git", "fetch", "--quiet", git_url(fork_repo), head_sha], cwd=d, timeout=900)
+    r = git(["fetch", "--quiet", git_url(fork_repo), head_sha], cwd=d, timeout=900)
     if r.returncode != 0:
         raise RuntimeError("fetch fork head failed: %s" % r.stderr[-500:])
     result_path, stderr_path = "/tmp/ocr-result.json", "/tmp/ocr-stderr.log"
